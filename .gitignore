@@ -99,3 +99,6 @@ ENV/
 
 # mypy
 .mypy_cache/
+ffprobe.exe
+ffplay.exe
+ffmpeg.exe
