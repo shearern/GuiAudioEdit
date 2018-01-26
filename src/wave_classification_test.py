@@ -49,7 +49,6 @@ if __name__ == '__main__':
 
     print "framerate:  ", wav.getframerate()
     print "samplewidth:", wav.getsampwidth()
-    print "frames:     ", wav.getnframes()
 
     frames_at_once = wav.getframerate() / 100 # 44100
 
