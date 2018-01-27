@@ -1,4 +1,4 @@
-import os
+import os, sys
 import wave
 import subprocess
 import struct
@@ -113,6 +113,10 @@ class AudioFormat(object):
 
 def get_raw_audio_data(path):
 
+    if not os.path.exists(path):
+        print("ERROR: File doesn't exist: " + path)
+        sys.exit(2)
+
     cmd = (
         '-i', path,
         '-f', 'wav', '-',
@@ -145,13 +149,124 @@ def get_raw_audio_data(path):
             frame_num += 1
 
 
-def avg_signal_value(path):
 
+class MovingAverage(object):
+    '''
+    Data collection used to calculate an average over a moving window
+
+    See https://en.wikipedia.org/wiki/Moving_average
+    '''
+
+    def __init__(self, size):
+        self.__size = size
+        self.__values = [None, ] * size
+        self.__average = 0
+        self.__i = 0
+
+    @property
+    def avg(self):
+        return self.__average
+
+    def add(self, value):
+        '''
+        Add a value to the sequence to calculate an average
+
+        param value: Numeric value to add
+        :param pop: If true, pop the oldest value off the front of the sequence
+        '''
+        
+        # Store value
+        old_value = self.__values[self.__i]
+        self.__values[self.__i] = value
+        self.__i = (self.__i + 1) % (self.__size)
+
+        # Update Average
+        if old_value is None:
+            buff_len = self.__i
+            if buff_len == 0: # We just wrapped around on the buffer
+                buff_len = self.__size
+            self.__average = self.__average + ((value - self.__average) / buff_len)
+        else:
+            self.__average = self.__average + (float(value) / self.__size) - (float(old_value) / self.__size)
+
+        # # TODO: Remove once it looks like math is working
+        # try:
+        #     self.__calls += 1
+        # except AttributeError:
+        #     self.__calls = 1
+        # if self.__calls % (44100 * 60 * 15) == 0:
+        #     # Recalculate average
+        #     avg = sum(self.__values) / float(len(self.__values))
+        #     print("Recalculating average from %s to %s" % (self.__average, avg))
+        #     if self.__average != 0:
+        #         print("  error: %0.6f" % (abs(avg-self.__average)/self.__average))
+        #     self.__average = avg
+
+
+class SilencePeriod(object):
+    def __init__(self, start):
+        self.start = start
+        self.end = start
+
+
+def find_silent_sections(path):
+
+    moving_avg_sec = 15
+    min_silence_len = timedelta(seconds=0.25)
+
+    for frame in get_raw_audio_data(path):
+
+        # Init
+        if frame.pos.frame_num == 0:
+
+            fmt = frame.fmt
+
+            ch = [{
+                'moving_avg': MovingAverage(fmt.framerate*moving_avg_sec),  # Setup moving average get average wave values
+                'period': None,
+                }, ] * fmt.num_channels
+
+            fill_frames = moving_avg_sec * fmt.framerate
+
+        # Normalize values from 0.0 to 1.0
+        sample = [abs(meassure) for meassure in frame.values_1]
+
+        # Consume initial seconds to fill moving average
+        # (note: won't detect silence in this first window)
+        if frame.pos.frame_num < fill_frames:
+            for c in fmt.num_channels:
+                ch[c]['moving_avg'].add(sample[c])
+
+        # Rest of the file
+        else:
+            for c in fmt.num_channels:
+                silence_threshold = ch[c]['moving_avg'].avg * 0.05
+                is_silent = sample[c] < silence_threshold
+                if is_silent:
+                    if ch[c]['period'] is None:
+                        ch[c]['period'] = SilencePeriod(start=frame.pos)
+                    else:
+                        ch[c]['period'].end = frame.pos
+                else:
+                    if ch[c]['period'] is not None:
+                        plength = ch[c]['period'].end.ts - ch[c]['period'].start.ts
+                        if plength >= min_silence_len:
+                            yield ch[c]['period']
+                    ch[c]['period'] = None
 
 
 if __name__ == '__main__':
 
     # First, find average value in signal
-    path = r"G:\User Files\Dropbox\SBC Recordings\Archive\2018\2018-01-07 Adult Bible Study\2018-01-07 Adult Bible Study - rec (partial).flac"
+    path = r"C:\Users\nshearer\Downloads\2018-01-07 Adult Bible Study - rec (partial).flac"
+
     for frame in get_raw_audio_data(path):
-        print frame.pos, frame.values_1
+
+        if frame.pos.frame_num % (44100 * 15) == 0:
+            print str(frame.pos)
+
+        # For the first 5 seconds, just add the value
+        #moving_avg.add(abs(frame.values_1[1]))
+
+        if frame.pos.frame_num > (44100 * 60 * 2):
+            break
