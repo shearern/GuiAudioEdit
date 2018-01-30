@@ -127,8 +127,20 @@ def _nbyte_iterator(data, bytes):
     # Setup iterators to slice through data
     i = iter(data)
     try:
-        while True:
-            yield i.next() + i.next()
+        if bytes == 1:
+            while True:
+                yield i.next()
+        elif bytes == 2:
+            while True:
+                yield i.next() + i.next()
+        elif bytes == 3:
+            while True:
+                yield i.next() + i.next() + i.next()
+        elif bytes == 4:
+            while True:
+                yield i.next() + i.next() + i.next() + i.next()
+        else:
+            raise Exception("Don't know how to handle %d bytes" % (bytes))
     except StopIteration:
         return
 
